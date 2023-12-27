@@ -23670,6 +23670,14 @@ const deprecated_v8 = {
     height,
     ...attributes
   }) {
+    // We need to perform a check here because in cases
+    // where attributes are added dynamically to blocks,
+    // block invalidation overrides the isEligible() method
+    // and forces the migration to run, so it's not guaranteed
+    // that `behaviors` or `behaviors.lightbox` will be defined.
+    if (!attributes.behaviors?.lightbox) {
+      return attributes;
+    }
     const {
       behaviors: {
         lightbox: {
@@ -35362,7 +35370,7 @@ const PatternEdit = ({
   clientId
 }) => {
   const selectedPattern = (0,external_wp_data_namespaceObject.useSelect)(select => select(external_wp_blockEditor_namespaceObject.store).__experimentalGetParsedPattern(attributes.slug), [attributes.slug]);
-  const currentThemeStylesheet = (0,external_wp_data_namespaceObject.useSelect)(select => select(external_wp_coreData_namespaceObject.store).getCurrentTheme().stylesheet);
+  const currentThemeStylesheet = (0,external_wp_data_namespaceObject.useSelect)(select => select(external_wp_coreData_namespaceObject.store).getCurrentTheme()?.stylesheet);
   const {
     replaceBlocks,
     __unstableMarkNextChangeAsNotPersistent
