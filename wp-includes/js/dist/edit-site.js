@@ -9658,6 +9658,45 @@ function useSupportedStyles(name, element) {
   return supportedPanels;
 }
 
+;// CONCATENATED MODULE: ./node_modules/@wordpress/edit-site/build-module/utils/set-nested-value.js
+/**
+ * Sets the value at path of object.
+ * If a portion of path doesn’t exist, it’s created.
+ * Arrays are created for missing index properties while objects are created
+ * for all other missing properties.
+ *
+ * This function intentionally mutates the input object.
+ *
+ * Inspired by _.set().
+ *
+ * @see https://lodash.com/docs/4.17.15#set
+ *
+ * @todo Needs to be deduplicated with its copy in `@wordpress/core-data`.
+ *
+ * @param {Object} object Object to modify
+ * @param {Array}  path   Path of the property to set.
+ * @param {*}      value  Value to set.
+ */
+function setNestedValue(object, path, value) {
+  if (!object || typeof object !== 'object') {
+    return object;
+  }
+  path.reduce((acc, key, idx) => {
+    if (acc[key] === undefined) {
+      if (Number.isInteger(path[idx + 1])) {
+        acc[key] = [];
+      } else {
+        acc[key] = {};
+      }
+    }
+    if (idx === path.length - 1) {
+      acc[key] = value;
+    }
+    return acc[key];
+  }, object);
+  return object;
+}
+
 ;// CONCATENATED MODULE: ./node_modules/@wordpress/edit-site/build-module/hooks/push-changes-to-global-styles/index.js
 
 /**
@@ -9677,6 +9716,7 @@ function useSupportedStyles(name, element) {
 /**
  * Internal dependencies
  */
+
 
 
 const {
@@ -9876,44 +9916,6 @@ function useChangesToPush(name, attributes, userConfig) {
     getBorderStyleChanges(attributes.style?.border, attributes.borderColor, blockUserConfig?.border).forEach(change => changes.push(change));
     return changes;
   }, [supports, attributes, blockUserConfig]);
-}
-
-/**
- * Sets the value at path of object.
- * If a portion of path doesn’t exist, it’s created.
- * Arrays are created for missing index properties while objects are created
- * for all other missing properties.
- *
- * This function intentionally mutates the input object.
- *
- * Inspired by _.set().
- *
- * @see https://lodash.com/docs/4.17.15#set
- *
- * @todo Needs to be deduplicated with its copy in `@wordpress/core-data`.
- *
- * @param {Object} object Object to modify
- * @param {Array}  path   Path of the property to set.
- * @param {*}      value  Value to set.
- */
-function setNestedValue(object, path, value) {
-  if (!object || typeof object !== 'object') {
-    return object;
-  }
-  path.reduce((acc, key, idx) => {
-    if (acc[key] === undefined) {
-      if (Number.isInteger(path[idx + 1])) {
-        acc[key] = [];
-      } else {
-        acc[key] = {};
-      }
-    }
-    if (idx === path.length - 1) {
-      acc[key] = value;
-    }
-    return acc[key];
-  }, object);
-  return object;
 }
 function cloneDeep(object) {
   return !object ? {} : JSON.parse(JSON.stringify(object));
@@ -20389,9 +20391,7 @@ function ViewTable({
     desc: 'descending'
   };
   const primaryField = fields.find(field => field.id === view.layout.primaryField);
-  return (0,external_React_.createElement)("div", {
-    className: "dataviews-view-table-wrapper"
-  }, (0,external_React_.createElement)("table", {
+  return (0,external_React_.createElement)(external_wp_element_namespaceObject.Fragment, null, (0,external_React_.createElement)("table", {
     className: "dataviews-view-table",
     "aria-busy": isLoading,
     "aria-describedby": tableNoticeId
@@ -24270,9 +24270,11 @@ function KeyboardShortcutsRegister() {
 
 
 
+
 /**
  * Internal dependencies
  */
+
 
 function KeyboardShortcutsGlobal() {
   const {
@@ -24280,16 +24282,28 @@ function KeyboardShortcutsGlobal() {
     isSavingEntityRecord
   } = (0,external_wp_data_namespaceObject.useSelect)(external_wp_coreData_namespaceObject.store);
   const {
+    hasNonPostEntityChanges
+  } = (0,external_wp_data_namespaceObject.useSelect)(external_wp_editor_namespaceObject.store);
+  const {
+    getCanvasMode
+  } = unlock((0,external_wp_data_namespaceObject.useSelect)(store_store));
+  const {
     setIsSaveViewOpened
   } = (0,external_wp_data_namespaceObject.useDispatch)(store_store);
   (0,external_wp_keyboardShortcuts_namespaceObject.useShortcut)('core/edit-site/save', event => {
     event.preventDefault();
     const dirtyEntityRecords = __experimentalGetDirtyEntityRecords();
-    const isDirty = !!dirtyEntityRecords.length;
+    const hasDirtyEntities = !!dirtyEntityRecords.length;
     const isSaving = dirtyEntityRecords.some(record => isSavingEntityRecord(record.kind, record.name, record.key));
-    if (!isSaving && isDirty) {
-      setIsSaveViewOpened(true);
+    const _hasNonPostEntityChanges = hasNonPostEntityChanges();
+    const isViewMode = getCanvasMode() === 'view';
+    if ((!hasDirtyEntities || !_hasNonPostEntityChanges || isSaving) && !isViewMode) {
+      return;
     }
+    // At this point, we know that there are dirty entities, other than
+    // the edited post, and we're not in the process of saving, so open
+    // save view.
+    setIsSaveViewOpened(true);
   });
   return null;
 }
@@ -26521,6 +26535,9 @@ function formatFontFamily(input) {
  * formatFontFaceName(", 'Open Sans', 'Helvetica Neue', sans-serif") => "Open Sans"
  */
 function formatFontFaceName(input) {
+  if (!input) {
+    return '';
+  }
   let output = input.trim();
   if (output.includes(',')) {
     output = output.split(',')
@@ -26679,6 +26696,32 @@ async function loadFontFaceInBrowser(fontFace, source, addTo = 'all') {
   }
 }
 
+/*
+ * Unloads the font face and remove it from the browser.
+ * It also removes it from the iframe document.
+ *
+ * Note that Font faces that were added to the set using the CSS @font-face rule
+ * remain connected to the corresponding CSS, and cannot be deleted.
+ *
+ * @see https://developer.mozilla.org/en-US/docs/Web/API/FontFaceSet/delete.
+ */
+function unloadFontFaceInBrowser(fontFace, removeFrom = 'all') {
+  const unloadFontFace = fonts => {
+    fonts.forEach(f => {
+      if (f.family === formatFontFaceName(fontFace?.fontFamily) && f.weight === fontFace?.fontWeight && f.style === fontFace?.fontStyle) {
+        fonts.delete(f);
+      }
+    });
+  };
+  if (removeFrom === 'document' || removeFrom === 'all') {
+    unloadFontFace(document.fonts);
+  }
+  if (removeFrom === 'iframe' || removeFrom === 'all') {
+    const iframeDocument = document.querySelector('iframe[name="editor-canvas"]').contentDocument;
+    unloadFontFace(iframeDocument.fonts);
+  }
+}
+
 /**
  * Retrieves the display source from a font face src.
  *
@@ -26751,8 +26794,26 @@ function makeFontFacesFormData(font) {
   }
 }
 async function batchInstallFontFaces(fontFamilyId, fontFacesData) {
-  const promises = fontFacesData.map(faceData => fetchInstallFontFace(fontFamilyId, faceData));
-  const responses = await Promise.allSettled(promises);
+  const responses = [];
+
+  /*
+   * Uses the same response format as Promise.allSettled, but executes requests in sequence to work
+   * around a race condition that can cause an error when the fonts directory doesn't exist yet.
+   */
+  for (const faceData of fontFacesData) {
+    try {
+      const response = await fetchInstallFontFace(fontFamilyId, faceData);
+      responses.push({
+        status: 'fulfilled',
+        value: response
+      });
+    } catch (error) {
+      responses.push({
+        status: 'rejected',
+        reason: error
+      });
+    }
+  }
   const results = {
     errors: [],
     successes: []
@@ -26772,7 +26833,7 @@ async function batchInstallFontFaces(fontFamilyId, fontFacesData) {
       // Handle network errors or other fetch-related errors
       results.errors.push({
         data: fontFacesData[index],
-        message: `Fetch error: ${result.reason.message}`
+        message: result.reason.message
       });
     }
   });
@@ -26926,12 +26987,13 @@ const {
 } = unlock(external_wp_blockEditor_namespaceObject.privateApis);
 
 
+
 const FontLibraryContext = (0,external_wp_element_namespaceObject.createContext)({});
 function FontLibraryProvider({
   children
 }) {
   const {
-    __experimentalSaveSpecifiedEntityEdits: saveSpecifiedEntityEdits
+    saveEntityRecord
   } = (0,external_wp_data_namespaceObject.useDispatch)(external_wp_coreData_namespaceObject.store);
   const {
     globalStylesId
@@ -26972,20 +27034,47 @@ function FontLibraryProvider({
   // theme.json file font families
   const [baseFontFamilies] = context_useGlobalSetting('typography.fontFamilies', undefined, 'base');
 
-  // Save font families to the global styles post in the database.
-  const saveFontFamilies = () => {
-    saveSpecifiedEntityEdits('root', 'globalStyles', globalStylesId, ['settings.typography.fontFamilies']);
+  /*
+   * Save the font families to the database.
+  	 * This function is called when the user activates or deactivates a font family.
+   * It only updates the global styles post content in the database for new font families.
+   * This avoids saving other styles/settings changed by the user using other parts of the editor.
+   * 
+   * It uses the font families from the param to avoid using the font families from an outdated state.
+   * 
+   * @param {Array} fonts - The font families that will be saved to the database.
+   */
+  const saveFontFamilies = async fonts => {
+    // Gets the global styles database post content.
+    const updatedGlobalStyles = globalStyles.record;
+
+    // Updates the database version of global styles with the edited font families in the client.
+    setNestedValue(updatedGlobalStyles, ['settings', 'typography', 'fontFamilies'], fonts);
+
+    // Saves a new version of the global styles in the database.
+    await saveEntityRecord('root', 'globalStyles', updatedGlobalStyles);
   };
 
   // Library Fonts
   const [modalTabOpen, setModalTabOpen] = (0,external_wp_element_namespaceObject.useState)(false);
   const [libraryFontSelected, setLibraryFontSelected] = (0,external_wp_element_namespaceObject.useState)(null);
-  const baseThemeFonts = baseFontFamilies?.theme ? baseFontFamilies.theme.map(f => setUIValuesNeeded(f, {
-    source: 'theme'
-  })).sort((a, b) => a.name.localeCompare(b.name)) : [];
+
+  // Themes Fonts are the fonts defined in the global styles (database persisted theme.json data).
   const themeFonts = fontFamilies?.theme ? fontFamilies.theme.map(f => setUIValuesNeeded(f, {
     source: 'theme'
   })).sort((a, b) => a.name.localeCompare(b.name)) : [];
+  const themeFontsSlugs = new Set(themeFonts.map(f => f.slug));
+
+  /*
+   * Base Theme Fonts are the fonts defined in the theme.json *file*.
+   *
+   * Uses the fonts from global styles + the ones from the theme.json file that hasn't repeated slugs.
+   * Avoids incosistencies with the fonts listed in the font library modal as base (unactivated).
+   * These inconsistencies can happen when the active theme fonts in global styles aren't defined in theme.json file as when a theme style variation is applied.
+   */
+  const baseThemeFonts = baseFontFamilies?.theme ? themeFonts.concat(baseFontFamilies.theme.filter(f => !themeFontsSlugs.has(f.slug)).map(f => setUIValuesNeeded(f, {
+    source: 'theme'
+  })).sort((a, b) => a.name.localeCompare(b.name))) : [];
   const customFonts = fontFamilies?.custom ? fontFamilies.custom.map(f => setUIValuesNeeded(f, {
     source: 'custom'
   })).sort((a, b) => a.name.localeCompare(b.name)) : [];
@@ -27005,7 +27094,7 @@ function FontLibraryProvider({
       setLibraryFontSelected(null);
       return;
     }
-    const fonts = font.source === 'theme' ? baseThemeFonts : baseCustomFonts;
+    const fonts = font.source === 'theme' ? themeFonts : baseCustomFonts;
 
     // Tries to find the font in the installed fonts
     const fontSelected = fonts.find(f => f.slug === font.slug);
@@ -27086,27 +27175,35 @@ function FontLibraryProvider({
         // Use the sucessfully installed font faces
         // As well as any font faces that were already installed (those will be activated)
         if (sucessfullyInstalledFontFaces?.length > 0 || alreadyInstalledFontFaces?.length > 0) {
-          fontFamilyToInstall.fontFace = [...sucessfullyInstalledFontFaces, ...alreadyInstalledFontFaces];
-          fontFamiliesToActivate.push(fontFamilyToInstall);
-        } else if (isANewFontFamily) {
-          // If the font family is new, delete it to avoid having font families without font faces.
+          // Use font data from REST API not from client to ensure
+          // correct font information is used.
+          installedFontFamily.fontFace = [...sucessfullyInstalledFontFaces];
+          fontFamiliesToActivate.push(installedFontFamily);
+        }
+
+        // If it's a system font but was installed successfully, activate it.
+        if (installedFontFamily && !fontFamilyToInstall?.fontFace?.length) {
+          fontFamiliesToActivate.push(installedFontFamily);
+        }
+
+        // If the font family is new and is not a system font, delete it to avoid having font families without font faces.
+        if (isANewFontFamily && fontFamilyToInstall?.fontFace?.length > 0 && sucessfullyInstalledFontFaces?.length === 0) {
           await fetchUninstallFontFamily(installedFontFamily.id);
         }
         installationErrors = installationErrors.concat(unsucessfullyInstalledFontFaces);
       }
+      installationErrors = installationErrors.reduce((unique, item) => unique.includes(item.message) ? unique : [...unique, item.message], []);
       if (fontFamiliesToActivate.length > 0) {
         // Activate the font family (add the font family to the global styles).
-        activateCustomFontFamilies(fontFamiliesToActivate);
-
+        const activeFonts = activateCustomFontFamilies(fontFamiliesToActivate);
         // Save the global styles to the database.
-        await saveSpecifiedEntityEdits('root', 'globalStyles', globalStylesId, ['settings.typography.fontFamilies']);
+        await saveFontFamilies(activeFonts);
         refreshLibrary();
       }
       if (installationErrors.length > 0) {
-        throw new Error((0,external_wp_i18n_namespaceObject.sprintf)( /* translators: %s: Specific error message returned from server. */
-        (0,external_wp_i18n_namespaceObject.__)('There were some errors installing fonts. %s'), installationErrors.reduce((errorMessageCollection, error) => {
-          return `${errorMessageCollection} ${error.message}`;
-        }, '')));
+        const installError = new Error((0,external_wp_i18n_namespaceObject.__)('There was an error installing fonts.'));
+        installError.installationErrors = installationErrors;
+        throw installError;
       }
     } finally {
       setIsInstalling(false);
@@ -27121,9 +27218,9 @@ function FontLibraryProvider({
       // Deactivate the font family if delete request is successful
       // (Removes the font family from the global styles).
       if (uninstalledFontFamily.deleted) {
-        deactivateFontFamily(fontFamilyToUninstall);
+        const activeFonts = deactivateFontFamily(fontFamilyToUninstall);
         // Save the global styles to the database.
-        await saveSpecifiedEntityEdits('root', 'globalStyles', globalStylesId, ['settings.typography.fontFamilies']);
+        await saveFontFamilies(activeFonts);
       }
 
       // Refresh the library (the library font families from database).
@@ -27141,20 +27238,51 @@ function FontLibraryProvider({
     // We want to save as active all the theme fonts at the beginning
     const initialCustomFonts = (_fontFamilies$font$so = fontFamilies?.[font.source]) !== null && _fontFamilies$font$so !== void 0 ? _fontFamilies$font$so : [];
     const newCustomFonts = initialCustomFonts.filter(f => f.slug !== font.slug);
-    setFontFamilies({
+    const activeFonts = {
       ...fontFamilies,
       [font.source]: newCustomFonts
-    });
+    };
+    setFontFamilies(activeFonts);
+    if (font.fontFace) {
+      font.fontFace.forEach(face => {
+        unloadFontFaceInBrowser(face, 'all');
+      });
+    }
+    return activeFonts;
   };
   const activateCustomFontFamilies = fontsToAdd => {
-    // Merge the existing custom fonts with the new fonts.
-    // Activate the fonts by set the new custom fonts array.
-    setFontFamilies({
+    const fontsToActivate = cleanFontsForSave(fontsToAdd);
+    const activeFonts = {
       ...fontFamilies,
-      custom: mergeFontFamilies(fontFamilies?.custom, fontsToAdd)
-    });
+      // Merge the existing custom fonts with the new fonts.
+      custom: mergeFontFamilies(fontFamilies?.custom, fontsToActivate)
+    };
+
+    // Activate the fonts by set the new custom fonts array.
+    setFontFamilies(activeFonts);
+    loadFontsInBrowser(fontsToActivate);
+    return activeFonts;
+  };
+
+  // Removes the id from the families and faces to avoid saving that to global styles post content.
+  const cleanFontsForSave = fonts => {
+    return fonts.map(({
+      id: _familyDbId,
+      fontFace,
+      ...font
+    }) => ({
+      ...font,
+      ...(fontFace && fontFace.length > 0 ? {
+        fontFace: fontFace.map(({
+          id: _faceDbId,
+          ...face
+        }) => face)
+      } : {})
+    }));
+  };
+  const loadFontsInBrowser = fonts => {
     // Add custom fonts to the browser.
-    fontsToAdd.forEach(font => {
+    fonts.forEach(font => {
       if (font.fontFace) {
         font.fontFace.forEach(face => {
           // Load font faces just in the iframe because they already are in the document.
@@ -27175,6 +27303,12 @@ function FontLibraryProvider({
       ...fontFamilies,
       [font.source]: newFonts
     });
+    const isFaceActivated = isFontActivated(font.slug, face?.fontStyle, face?.fontWeight, font.source);
+    if (isFaceActivated) {
+      loadFontFaceInBrowser(face, getDisplaySrcFromFontFace(face?.src), 'all');
+    } else {
+      unloadFontFaceInBrowser(face, 'all');
+    }
   };
   const loadFontFaceAsset = async fontFace => {
     // If the font doesn't have a src, don't load it.
@@ -27218,6 +27352,7 @@ function FontLibraryProvider({
     value: {
       libraryFontSelected,
       handleSetLibraryFontSelected,
+      fontFamilies,
       themeFonts,
       baseThemeFonts,
       customFonts,
@@ -27516,7 +27651,8 @@ function InstalledFonts() {
     getFontFacesActivated,
     fontFamiliesHasChanges,
     notice,
-    setNotice
+    setNotice,
+    fontFamilies
   } = (0,external_wp_element_namespaceObject.useContext)(FontLibraryContext);
   const [isConfirmDeleteOpen, setIsConfirmDeleteOpen] = (0,external_wp_element_namespaceObject.useState)(false);
   const customFontFamilyId = libraryFontSelected?.source === 'custom' && libraryFontSelected?.id;
@@ -27646,7 +27782,9 @@ function InstalledFonts() {
     onClick: handleUninstallClick
   }, (0,external_wp_i18n_namespaceObject.__)('Delete')), (0,external_React_.createElement)(external_wp_components_namespaceObject.Button, {
     variant: "primary",
-    onClick: saveFontFamilies,
+    onClick: () => {
+      saveFontFamilies(fontFamilies);
+    },
     disabled: !fontFamiliesHasChanges,
     __experimentalIsFocusable: true
   }, (0,external_wp_i18n_namespaceObject.__)('Update'))));
@@ -28082,6 +28220,7 @@ function FontCollection({
     isSmall: true,
     onClick: () => {
       setSelectedFont(null);
+      setNotice(null);
     },
     "aria-label": (0,external_wp_i18n_namespaceObject.__)('Navigate to the previous view')
   }), (0,external_React_.createElement)(external_wp_components_namespaceObject.__experimentalHeading, {
@@ -28143,8 +28282,8 @@ function FontCollection({
     spacing: 2
   }, (0,external_wp_element_namespaceObject.createInterpolateElement)((0,external_wp_i18n_namespaceObject.sprintf)(
   // translators: %s: Total number of pages.
-  (0,external_wp_i18n_namespaceObject._x)('Page <CurrenPageControl /> of %s', 'paging'), totalPages), {
-    CurrenPageControl: (0,external_React_.createElement)(external_wp_components_namespaceObject.SelectControl, {
+  (0,external_wp_i18n_namespaceObject._x)('Page <CurrentPageControl /> of %s', 'paging'), totalPages), {
+    CurrentPageControl: (0,external_React_.createElement)(external_wp_components_namespaceObject.SelectControl, {
       "aria-label": (0,external_wp_i18n_namespaceObject.__)('Current page'),
       value: page,
       options: [...Array(totalPages)].map((e, i) => {
@@ -32082,29 +32221,42 @@ function UploadFonts() {
    * @param {Array} files The files to be filtered
    * @return {void}
    */
-  const handleFilesUpload = files => {
+  const handleFilesUpload = async files => {
     setNotice(null);
     setIsUploading(true);
     const uniqueFilenames = new Set();
     const selectedFiles = [...files];
-    const allowedFiles = selectedFiles.filter(file => {
-      if (uniqueFilenames.has(file.name)) {
-        return false; // Discard duplicates
+    let hasInvalidFiles = false;
+
+    // Use map to create a promise for each file check, then filter with Promise.all.
+    const checkFilesPromises = selectedFiles.map(async file => {
+      const isFont = await isFontFile(file);
+      if (!isFont) {
+        hasInvalidFiles = true;
+        return null; // Return null for invalid files.
       }
-      // Eliminates files that are not allowed
+      // Check for duplicates
+      if (uniqueFilenames.has(file.name)) {
+        return null; // Return null for duplicates.
+      }
+      // Check if the file extension is allowed.
       const fileExtension = file.name.split('.').pop().toLowerCase();
       if (ALLOWED_FILE_EXTENSIONS.includes(fileExtension)) {
         uniqueFilenames.add(file.name);
-        return true; // Keep file if the extension is allowed
+        return file; // Return the file if it passes all checks.
       }
-      return false; // Discard file extension not allowed
+      return null; // Return null for disallowed file extensions.
     });
+
+    // Filter out the nulls after all promises have resolved.
+    const allowedFiles = (await Promise.all(checkFilesPromises)).filter(file => null !== file);
     if (allowedFiles.length > 0) {
       loadFiles(allowedFiles);
     } else {
+      const message = hasInvalidFiles ? (0,external_wp_i18n_namespaceObject.__)('Sorry, you are not allowed to upload this file type.') : (0,external_wp_i18n_namespaceObject.__)('No fonts found to install.');
       setNotice({
         type: 'error',
-        message: (0,external_wp_i18n_namespaceObject.__)('No fonts found to install.')
+        message
       });
       setIsUploading(false);
     }
@@ -32124,6 +32276,23 @@ function UploadFonts() {
     }));
     handleInstall(fontFacesLoaded);
   };
+
+  /**
+   * Checks if a file is a valid Font file.
+   *
+   * @param {File} file The file to be checked.
+   * @return {boolean} Whether the file is a valid font file.
+   */
+  async function isFontFile(file) {
+    const font = new Font('Uploaded Font');
+    try {
+      const buffer = await readFileAsArrayBuffer(file);
+      await font.fromDataBuffer(buffer, 'font');
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
 
   // Create a function to read the file as array buffer
   async function readFileAsArrayBuffer(file) {
@@ -32177,7 +32346,8 @@ function UploadFonts() {
     } catch (error) {
       setNotice({
         type: 'error',
-        message: error.message
+        message: error.message,
+        errors: error?.installationErrors
       });
     }
     setIsUploading(false);
@@ -32190,8 +32360,11 @@ function UploadFonts() {
     className: "font-library-modal__local-fonts"
   }, notice && (0,external_React_.createElement)(external_wp_components_namespaceObject.Notice, {
     status: notice.type,
+    __unstableHTML: true,
     onRemove: () => setNotice(null)
-  }, notice.message), isUploading && (0,external_React_.createElement)(external_wp_components_namespaceObject.FlexItem, null, (0,external_React_.createElement)("div", {
+  }, notice.message, notice.errors && (0,external_React_.createElement)("ul", null, notice.errors.map((error, index) => (0,external_React_.createElement)("li", {
+    key: index
+  }, error)))), isUploading && (0,external_React_.createElement)(external_wp_components_namespaceObject.FlexItem, null, (0,external_React_.createElement)("div", {
     className: "font-library-modal__upload-area"
   }, (0,external_React_.createElement)(upload_fonts_ProgressBar, null))), !isUploading && (0,external_React_.createElement)(external_wp_components_namespaceObject.FormFileUpload, {
     accept: ALLOWED_FILE_EXTENSIONS.map(ext => `.${ext}`).join(','),
@@ -32207,7 +32380,7 @@ function UploadFonts() {
     margin: 2
   }), (0,external_React_.createElement)(external_wp_components_namespaceObject.__experimentalText, {
     className: "font-library-modal__upload-area__text"
-  }, (0,external_wp_i18n_namespaceObject.__)('Uploaded fonts appear in your library and can be used in your theme. Supported formats: .tff, .otf, .woff, and .woff2.'))));
+  }, (0,external_wp_i18n_namespaceObject.__)('Uploaded fonts appear in your library and can be used in your theme. Supported formats: .ttf, .otf, .woff, and .woff2.'))));
 }
 /* harmony default export */ const upload_fonts = (UploadFonts);
 
@@ -32235,7 +32408,7 @@ const {
 } = unlock(external_wp_components_namespaceObject.privateApis);
 const DEFAULT_TAB = {
   id: 'installed-fonts',
-  title: (0,external_wp_i18n_namespaceObject.__)('Library')
+  title: (0,external_wp_i18n_namespaceObject._x)('Library', 'Font library')
 };
 const UPLOAD_TAB = {
   id: 'upload-fonts',
@@ -36028,7 +36201,7 @@ function useNavigateToPreviousEntityRecord() {
   const history = use_site_editor_settings_useHistory();
   const goBack = (0,external_wp_element_namespaceObject.useMemo)(() => {
     const isFocusMode = location.params.focusMode || location.params.postId && FOCUSABLE_ENTITIES.includes(location.params.postType);
-    const didComeFromEditorCanvas = previousLocation?.params.postId && previousLocation?.params.postType && previousLocation?.params.canvas === 'edit';
+    const didComeFromEditorCanvas = previousLocation?.params.canvas === 'edit';
     const showBackButton = isFocusMode && didComeFromEditorCanvas;
     return showBackButton ? () => history.back() : undefined;
     // Disable reason: previousLocation changes when the component updates for any reason, not
@@ -36544,8 +36717,8 @@ const pagination_Pagination = (0,external_wp_element_namespaceObject.memo)(funct
     className: "dataviews-pagination__page-selection"
   }, (0,external_wp_element_namespaceObject.createInterpolateElement)((0,external_wp_i18n_namespaceObject.sprintf)(
   // translators: %s: Total number of pages.
-  (0,external_wp_i18n_namespaceObject._x)('Page <CurrenPageControl /> of %s', 'paging'), totalPages), {
-    CurrenPageControl: (0,external_React_.createElement)(external_wp_components_namespaceObject.SelectControl, {
+  (0,external_wp_i18n_namespaceObject._x)('Page <CurrentPageControl /> of %s', 'paging'), totalPages), {
+    CurrentPageControl: (0,external_React_.createElement)(external_wp_components_namespaceObject.SelectControl, {
       "aria-label": (0,external_wp_i18n_namespaceObject.__)('Current page'),
       value: view.page,
       options: Array.from(Array(totalPages)).map((_, i) => {
@@ -42355,9 +42528,6 @@ function DataViews({
   const hasPossibleBulkAction = dataviews_useSomeItemHasAPossibleBulkAction(actions, data);
   return (0,external_React_.createElement)("div", {
     className: "dataviews-wrapper"
-  }, (0,external_React_.createElement)(external_wp_components_namespaceObject.__experimentalVStack, {
-    spacing: 3,
-    justify: "flex-start"
   }, (0,external_React_.createElement)(external_wp_components_namespaceObject.__experimentalHStack, {
     alignment: "top",
     justify: "start",
@@ -42404,7 +42574,7 @@ function DataViews({
     view: view,
     onChangeView: onChangeView,
     paginationInfo: paginationInfo
-  })));
+  }));
 }
 
 ;// CONCATENATED MODULE: ./node_modules/@wordpress/edit-site/build-module/components/page/header.js

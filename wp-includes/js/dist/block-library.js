@@ -6926,7 +6926,9 @@ function code_save_save({
     // prevent embedding in PHP. Ideally checks for the code block,
     // or pre/code tags, should be made on the PHP side?
     ,
-    value: utils_escape(attributes.content.toString())
+    value: utils_escape(typeof attributes.content === 'string' ? attributes.content : attributes.content.toHTMLString({
+      preserveWhiteSpace: true
+    }))
   }));
 }
 
@@ -24119,14 +24121,15 @@ const heading_settings = {
       level
     } = attributes;
     const customName = attributes?.metadata?.name;
+    const hasContent = content?.length > 0;
 
     // In the list view, use the block's content as the label.
     // If the content is empty, fall back to the default label.
-    if (context === 'list-view' && (customName || content)) {
-      return attributes?.metadata?.name || content;
+    if (context === 'list-view' && (customName || hasContent)) {
+      return customName || content;
     }
     if (context === 'accessibility') {
-      return !content || content.length === 0 ? (0,external_wp_i18n_namespaceObject.sprintf)( /* translators: accessibility text. %s: heading level. */
+      return !hasContent ? (0,external_wp_i18n_namespaceObject.sprintf)( /* translators: accessibility text. %s: heading level. */
       (0,external_wp_i18n_namespaceObject.__)('Level %s. Empty.'), level) : (0,external_wp_i18n_namespaceObject.sprintf)( /* translators: accessibility text. 1: heading level. 2: heading content. */
       (0,external_wp_i18n_namespaceObject.__)('Level %1$s. %2$s'), level, content);
     }
@@ -25961,6 +25964,23 @@ function image_Image({
       });
     }
   }
+  function resetLightbox() {
+    // When deleting a link from an image while lightbox settings
+    // are enabled by default, we should disable the lightbox,
+    // otherwise the resulting UX looks like a mistake.
+    // See https://github.com/WordPress/gutenberg/pull/59890/files#r1532286123.
+    if (lightboxSetting?.enabled && lightboxSetting?.allowEditing) {
+      setAttributes({
+        lightbox: {
+          enabled: false
+        }
+      });
+    } else {
+      setAttributes({
+        lightbox: undefined
+      });
+    }
+  }
   function onSetTitle(value) {
     // This is the HTML title attribute, separate from the media object
     // title.
@@ -26028,7 +26048,10 @@ function image_Image({
     availableUnits: ['px']
   });
   const [lightboxSetting] = (0,external_wp_blockEditor_namespaceObject.useSettings)('lightbox');
-  const showLightboxSetting = !!lightbox || lightboxSetting?.allowEditing === true;
+  const showLightboxSetting =
+  // If a block-level override is set, we should give users the option to
+  // remove that override, even if the lightbox UI is disabled in the settings.
+  !!lightbox && lightbox?.enabled !== lightboxSetting?.enabled || lightboxSetting?.allowEditing;
   const lightboxChecked = !!lightbox?.enabled || !lightbox && !!lightboxSetting?.enabled;
   const dimensionsControl = (0,external_React_namespaceObject.createElement)(DimensionsTool, {
     value: {
@@ -26135,7 +26158,8 @@ function image_Image({
     rel: rel,
     showLightboxSetting: showLightboxSetting,
     lightboxEnabled: lightboxChecked,
-    onSetLightbox: onSetLightbox
+    onSetLightbox: onSetLightbox,
+    resetLightbox: resetLightbox
   }), allowCrop && (0,external_React_namespaceObject.createElement)(external_wp_components_namespaceObject.ToolbarButton, {
     onClick: () => setIsEditingImage(true),
     icon: library_crop,
@@ -32473,7 +32497,7 @@ function NavigationMenuSelector({
 }) {
   /* translators: %s: The name of a menu. */
   const createActionLabel = (0,external_wp_i18n_namespaceObject.__)("Create from '%s'");
-  const [isCreatingMenu, setIsCreatingMenu] = (0,external_wp_element_namespaceObject.useState)(false);
+  const [isUpdatingMenuRef, setIsUpdatingMenuRef] = (0,external_wp_element_namespaceObject.useState)(false);
   actionLabel = actionLabel || createActionLabel;
   const {
     menus: classicMenus
@@ -32496,10 +32520,11 @@ function NavigationMenuSelector({
       return {
         value: id,
         label,
-        ariaLabel: (0,external_wp_i18n_namespaceObject.sprintf)(actionLabel, label)
+        ariaLabel: (0,external_wp_i18n_namespaceObject.sprintf)(actionLabel, label),
+        disabled: isUpdatingMenuRef || isResolvingNavigationMenus || !hasResolvedNavigationMenus
       };
     }) || [];
-  }, [navigationMenus, actionLabel]);
+  }, [navigationMenus, actionLabel, isResolvingNavigationMenus, hasResolvedNavigationMenus, isUpdatingMenuRef]);
   const hasNavigationMenus = !!navigationMenus?.length;
   const hasClassicMenus = !!classicMenus?.length;
   const showNavigationMenus = !!canSwitchNavigationMenu;
@@ -32508,7 +32533,7 @@ function NavigationMenuSelector({
   const noBlockMenus = !hasNavigationMenus && hasResolvedNavigationMenus;
   const menuUnavailable = hasResolvedNavigationMenus && currentMenuId === null;
   let selectorLabel = '';
-  if (isCreatingMenu || isResolvingNavigationMenus) {
+  if (isResolvingNavigationMenus) {
     selectorLabel = (0,external_wp_i18n_namespaceObject.__)('Loading…');
   } else if (noMenuSelected || noBlockMenus || menuUnavailable) {
     // Note: classic Menus may be available.
@@ -32518,10 +32543,10 @@ function NavigationMenuSelector({
     selectorLabel = currentTitle;
   }
   (0,external_wp_element_namespaceObject.useEffect)(() => {
-    if (isCreatingMenu && (createNavigationMenuIsSuccess || createNavigationMenuIsError)) {
-      setIsCreatingMenu(false);
+    if (isUpdatingMenuRef && (createNavigationMenuIsSuccess || createNavigationMenuIsError)) {
+      setIsUpdatingMenuRef(false);
     }
-  }, [hasResolvedNavigationMenus, createNavigationMenuIsSuccess, canUserCreateNavigationMenu, createNavigationMenuIsError, isCreatingMenu, menuUnavailable, noBlockMenus, noMenuSelected]);
+  }, [hasResolvedNavigationMenus, createNavigationMenuIsSuccess, canUserCreateNavigationMenu, createNavigationMenuIsError, isUpdatingMenuRef, menuUnavailable, noBlockMenus, noMenuSelected]);
   const NavigationMenuSelectorDropdown = (0,external_React_namespaceObject.createElement)(external_wp_components_namespaceObject.DropdownMenu, {
     label: selectorLabel,
     icon: more_vertical,
@@ -32535,35 +32560,35 @@ function NavigationMenuSelector({
   }, (0,external_React_namespaceObject.createElement)(external_wp_components_namespaceObject.MenuItemsChoice, {
     value: currentMenuId,
     onSelect: menuId => {
-      setIsCreatingMenu(true);
       onSelectNavigationMenu(menuId);
       onClose();
     },
-    choices: menuChoices,
-    disabled: isCreatingMenu
+    choices: menuChoices
   })), showClassicMenus && hasClassicMenus && (0,external_React_namespaceObject.createElement)(external_wp_components_namespaceObject.MenuGroup, {
     label: (0,external_wp_i18n_namespaceObject.__)('Import Classic Menus')
   }, classicMenus?.map(menu => {
     const label = (0,external_wp_htmlEntities_namespaceObject.decodeEntities)(menu.name);
     return (0,external_React_namespaceObject.createElement)(external_wp_components_namespaceObject.MenuItem, {
-      onClick: () => {
-        setIsCreatingMenu(true);
-        onSelectClassicMenu(menu);
+      onClick: async () => {
+        setIsUpdatingMenuRef(true);
+        await onSelectClassicMenu(menu);
+        setIsUpdatingMenuRef(false);
         onClose();
       },
       key: menu.id,
       "aria-label": (0,external_wp_i18n_namespaceObject.sprintf)(createActionLabel, label),
-      disabled: isCreatingMenu
+      disabled: isUpdatingMenuRef || isResolvingNavigationMenus || !hasResolvedNavigationMenus
     }, label);
   })), canUserCreateNavigationMenu && (0,external_React_namespaceObject.createElement)(external_wp_components_namespaceObject.MenuGroup, {
     label: (0,external_wp_i18n_namespaceObject.__)('Tools')
   }, (0,external_React_namespaceObject.createElement)(external_wp_components_namespaceObject.MenuItem, {
-    disabled: isCreatingMenu,
-    onClick: () => {
+    onClick: async () => {
+      setIsUpdatingMenuRef(true);
+      await onCreateNew();
+      setIsUpdatingMenuRef(false);
       onClose();
-      onCreateNew();
-      setIsCreatingMenu(true);
-    }
+    },
+    disabled: isUpdatingMenuRef || isResolvingNavigationMenus || !hasResolvedNavigationMenus
   }, (0,external_wp_i18n_namespaceObject.__)('Create new menu')))));
   return NavigationMenuSelectorDropdown;
 }
@@ -34697,8 +34722,8 @@ function Navigation({
     isSuccess: createNavigationMenuIsSuccess,
     isError: createNavigationMenuIsError
   } = useCreateNavigationMenu(clientId);
-  const createUntitledEmptyNavigationMenu = () => {
-    createNavigationMenu('');
+  const createUntitledEmptyNavigationMenu = async () => {
+    await createNavigationMenu('');
   };
   const {
     hasUncontrolledInnerBlocks,
@@ -34827,12 +34852,7 @@ function Navigation({
   const [detectedOverlayBackgroundColor, setDetectedOverlayBackgroundColor] = (0,external_wp_element_namespaceObject.useState)();
   const [detectedOverlayColor, setDetectedOverlayColor] = (0,external_wp_element_namespaceObject.useState)();
   const onSelectClassicMenu = async classicMenu => {
-    const navMenu = await convertClassicMenu(classicMenu.id, classicMenu.name, 'draft');
-    if (navMenu) {
-      handleUpdateMenu(navMenu.id, {
-        focusNavigationBlock: true
-      });
-    }
+    return convertClassicMenu(classicMenu.id, classicMenu.name, 'draft');
   };
   const onSelectNavigationMenu = menuId => {
     handleUpdateMenu(menuId);
@@ -34859,11 +34879,14 @@ function Navigation({
     }
     if (classicMenuConversionStatus === CLASSIC_MENU_CONVERSION_SUCCESS) {
       showClassicMenuConversionNotice((0,external_wp_i18n_namespaceObject.__)('Classic menu imported successfully.'));
+      handleUpdateMenu(createNavigationMenuPost?.id, {
+        focusNavigationBlock: true
+      });
     }
     if (classicMenuConversionStatus === CLASSIC_MENU_CONVERSION_ERROR) {
       showClassicMenuConversionNotice((0,external_wp_i18n_namespaceObject.__)('Classic menu import failed.'));
     }
-  }, [classicMenuConversionStatus, classicMenuConversionError, hideClassicMenuConversionNotice, showClassicMenuConversionNotice]);
+  }, [classicMenuConversionStatus, classicMenuConversionError, hideClassicMenuConversionNotice, showClassicMenuConversionNotice, createNavigationMenuPost?.id, handleUpdateMenu]);
   (0,external_wp_element_namespaceObject.useEffect)(() => {
     if (!enableContrastChecking) {
       return;
@@ -35129,16 +35152,14 @@ function Navigation({
   }), (0,external_React_namespaceObject.createElement)(manage_menus_button, {
     disabled: isManageMenusButtonDisabled,
     className: "wp-block-navigation-manage-menus-button"
-  })), isLoading && (0,external_React_namespaceObject.createElement)(TagName, {
-    ...blockProps
-  }, (0,external_React_namespaceObject.createElement)("div", {
+  })), (0,external_React_namespaceObject.createElement)(TagName, {
+    ...blockProps,
+    "aria-describedby": !isPlaceholder && !isLoading ? accessibleDescriptionId : undefined
+  }, isLoading && (0,external_React_namespaceObject.createElement)("div", {
     className: "wp-block-navigation__loading-indicator-container"
   }, (0,external_React_namespaceObject.createElement)(external_wp_components_namespaceObject.Spinner, {
     className: "wp-block-navigation__loading-indicator"
-  }))), !isLoading && (0,external_React_namespaceObject.createElement)(TagName, {
-    ...blockProps,
-    "aria-describedby": !isPlaceholder ? accessibleDescriptionId : undefined
-  }, (0,external_React_namespaceObject.createElement)(AccessibleMenuDescription, {
+  })), !isLoading && (0,external_React_namespaceObject.createElement)(external_React_namespaceObject.Fragment, null, (0,external_React_namespaceObject.createElement)(AccessibleMenuDescription, {
     id: accessibleDescriptionId
   }), (0,external_React_namespaceObject.createElement)(ResponsiveWrapper, {
     id: clientId,
@@ -35155,7 +35176,7 @@ function Navigation({
     hasCustomPlaceholder: !!CustomPlaceholder,
     templateLock: templateLock,
     orientation: orientation
-  })))));
+  }))))));
 }
 /* harmony default export */ const navigation_edit = ((0,external_wp_blockEditor_namespaceObject.withColors)({
   textColor: 'color'
@@ -36235,6 +36256,7 @@ function NavigationLinkEdit({
   } = getColors(context, !isTopLevelLink);
   function onKeyDown(event) {
     if (external_wp_keycodes_namespaceObject.isKeyboardEvent.primary(event, 'k') || (!url || isDraft || isInvalid) && event.keyCode === external_wp_keycodes_namespaceObject.ENTER) {
+      event.preventDefault();
       setIsLinkOpen(true);
     }
   }
@@ -37061,6 +37083,7 @@ function NavigationSubmenuEdit({
   } = getColors(context, parentCount > 0);
   function onKeyDown(event) {
     if (external_wp_keycodes_namespaceObject.isKeyboardEvent.primary(event, 'k')) {
+      event.preventDefault();
       setIsLinkOpen(true);
     }
   }
@@ -45019,7 +45042,15 @@ const useUnsupportedBlocks = clientId => {
     const blocks = {};
     getClientIdsOfDescendants(clientId).forEach(descendantClientId => {
       const blockName = getBlockName(descendantClientId);
-      if (!blockName.startsWith('core/')) {
+      /*
+       * Client side navigation can be true in two states:
+       *  - supports.interactivity = true;
+       *  - supports.interactivity.clientNavigation = true;
+       */
+      const blockSupportsInteractivity = Object.is((0,external_wp_blocks_namespaceObject.getBlockSupport)(blockName, 'interactivity'), true);
+      const blockSupportsInteractivityClientNavigation = (0,external_wp_blocks_namespaceObject.getBlockSupport)(blockName, 'interactivity.clientNavigation');
+      const blockInteractivity = blockSupportsInteractivity || blockSupportsInteractivityClientNavigation;
+      if (!blockInteractivity) {
         blocks.hasBlocksFromPlugins = true;
       } else if (blockName === 'core/post-content') {
         blocks.hasPostContentBlock = true;
@@ -45895,7 +45926,7 @@ function EnhancedPaginationModal({
   };
   let notice = (0,external_wp_i18n_namespaceObject.__)('If you still want to prevent full page reloads, remove that block, then disable "Force page reload" again in the Query Block settings.');
   if (hasBlocksFromPlugins) {
-    notice = (0,external_wp_i18n_namespaceObject.__)('Currently, avoiding full page reloads is not possible when blocks from plugins are present inside the Query block.') + ' ' + notice;
+    notice = (0,external_wp_i18n_namespaceObject.__)('Currently, avoiding full page reloads is not possible when non-interactive or non-clientNavigation compatible blocks from plugins are present inside the Query block.') + ' ' + notice;
   } else if (hasPostContentBlock) {
     notice = (0,external_wp_i18n_namespaceObject.__)('Currently, avoiding full page reloads is not possible when a Content block is present inside the Query block.') + ' ' + notice;
   }
@@ -48943,6 +48974,30 @@ function setBlockEditMode(setEditMode, blocks, mode) {
     block.name === block_name ? 'disabled' : mode);
   });
 }
+function RecursionWarning() {
+  const blockProps = (0,external_wp_blockEditor_namespaceObject.useBlockProps)();
+  return (0,external_React_namespaceObject.createElement)("div", {
+    ...blockProps
+  }, (0,external_React_namespaceObject.createElement)(external_wp_blockEditor_namespaceObject.Warning, null, (0,external_wp_i18n_namespaceObject.__)('Block cannot be rendered inside itself.')));
+}
+
+// Wrap the main Edit function for the pattern block with a recursion wrapper
+// that allows short-circuiting rendering as early as possible, before any
+// of the other effects in the block edit have run.
+function ReusableBlockEditRecursionWrapper(props) {
+  const {
+    ref
+  } = props.attributes;
+  const hasAlreadyRendered = (0,external_wp_blockEditor_namespaceObject.useHasRecursion)(ref);
+  if (hasAlreadyRendered) {
+    return (0,external_React_namespaceObject.createElement)(RecursionWarning, null);
+  }
+  return (0,external_React_namespaceObject.createElement)(external_wp_blockEditor_namespaceObject.RecursionProvider, {
+    uniqueId: ref
+  }, (0,external_React_namespaceObject.createElement)(ReusableBlockEdit, {
+    ...props
+  }));
+}
 function ReusableBlockEdit({
   name,
   attributes: {
@@ -48954,7 +49009,6 @@ function ReusableBlockEdit({
   setAttributes
 }) {
   const registry = (0,external_wp_data_namespaceObject.useRegistry)();
-  const hasAlreadyRendered = (0,external_wp_blockEditor_namespaceObject.useHasRecursion)(ref);
   const {
     record,
     editedRecord,
@@ -48981,7 +49035,8 @@ function ReusableBlockEdit({
     userCanEdit,
     getBlockEditingMode,
     onNavigateToEntityRecord,
-    editingMode
+    editingMode,
+    hasPatternOverridesSource
   } = (0,external_wp_data_namespaceObject.useSelect)(select => {
     const {
       canUser
@@ -48991,6 +49046,9 @@ function ReusableBlockEdit({
       getSettings,
       getBlockEditingMode: _getBlockEditingMode
     } = select(external_wp_blockEditor_namespaceObject.store);
+    const {
+      getBlockBindingsSource
+    } = unlock(select(external_wp_blocks_namespaceObject.store));
     const blocks = getBlocks(patternClientId);
     const canEdit = canUser('update', 'blocks', ref);
 
@@ -49000,7 +49058,8 @@ function ReusableBlockEdit({
       userCanEdit: canEdit,
       getBlockEditingMode: _getBlockEditingMode,
       onNavigateToEntityRecord: getSettings().onNavigateToEntityRecord,
-      editingMode: _getBlockEditingMode(patternClientId)
+      editingMode: _getBlockEditingMode(patternClientId),
+      hasPatternOverridesSource: !!getBlockBindingsSource('core/pattern-overrides')
     };
   }, [patternClientId, ref]);
 
@@ -49008,9 +49067,9 @@ function ReusableBlockEdit({
   (0,external_wp_element_namespaceObject.useEffect)(() => {
     setBlockEditMode(setBlockEditingMode, innerBlocks,
     // Disable editing if the pattern itself is disabled.
-    editingMode === 'disabled' ? 'disabled' : undefined);
-  }, [editingMode, innerBlocks, setBlockEditingMode]);
-  const canOverrideBlocks = (0,external_wp_element_namespaceObject.useMemo)(() => hasOverridableBlocks(innerBlocks), [innerBlocks]);
+    editingMode === 'disabled' || !hasPatternOverridesSource ? 'disabled' : undefined);
+  }, [editingMode, innerBlocks, setBlockEditingMode, hasPatternOverridesSource]);
+  const canOverrideBlocks = (0,external_wp_element_namespaceObject.useMemo)(() => hasPatternOverridesSource && hasOverridableBlocks(innerBlocks), [hasPatternOverridesSource, innerBlocks]);
   const initialBlocks = (0,external_wp_element_namespaceObject.useMemo)(() => {
     var _editedRecord$blocks$;
     return (// Clone the blocks to generate new client IDs.
@@ -49029,11 +49088,12 @@ function ReusableBlockEdit({
     registry.batch(() => {
       setBlockEditingMode(patternClientId, 'default');
       syncDerivedUpdates(() => {
-        replaceInnerBlocks(patternClientId, applyInitialContentValuesToInnerBlocks(initialBlocks, initialContent.current, defaultContent.current, legacyIdMap.current));
+        const blocks = hasPatternOverridesSource ? applyInitialContentValuesToInnerBlocks(initialBlocks, initialContent.current, defaultContent.current, legacyIdMap.current) : initialBlocks;
+        replaceInnerBlocks(patternClientId, blocks);
       });
       setBlockEditingMode(patternClientId, originalEditingMode);
     });
-  }, [__unstableMarkNextChangeAsNotPersistent, patternClientId, initialBlocks, replaceInnerBlocks, registry, getBlockEditingMode, setBlockEditingMode, syncDerivedUpdates]);
+  }, [hasPatternOverridesSource, __unstableMarkNextChangeAsNotPersistent, patternClientId, initialBlocks, replaceInnerBlocks, registry, getBlockEditingMode, setBlockEditingMode, syncDerivedUpdates]);
   const {
     alignment,
     layout
@@ -49055,6 +49115,9 @@ function ReusableBlockEdit({
   // Sync the `content` attribute from the updated blocks to the pattern block.
   // `syncDerivedUpdates` is used here to avoid creating an additional undo level.
   (0,external_wp_element_namespaceObject.useEffect)(() => {
+    if (!hasPatternOverridesSource) {
+      return;
+    }
     const {
       getBlocks
     } = registry.select(external_wp_blockEditor_namespaceObject.store);
@@ -49070,7 +49133,7 @@ function ReusableBlockEdit({
         });
       }
     }, external_wp_blockEditor_namespaceObject.store);
-  }, [syncDerivedUpdates, patternClientId, registry, setAttributes]);
+  }, [hasPatternOverridesSource, syncDerivedUpdates, patternClientId, registry, setAttributes]);
   const handleEditOriginal = () => {
     onNavigateToEntityRecord({
       postId: ref,
@@ -49083,18 +49146,13 @@ function ReusableBlockEdit({
     }
   };
   let children = null;
-  if (hasAlreadyRendered) {
-    children = (0,external_React_namespaceObject.createElement)(external_wp_blockEditor_namespaceObject.Warning, null, (0,external_wp_i18n_namespaceObject.__)('Block cannot be rendered inside itself.'));
-  }
   if (isMissing) {
     children = (0,external_React_namespaceObject.createElement)(external_wp_blockEditor_namespaceObject.Warning, null, (0,external_wp_i18n_namespaceObject.__)('Block has been deleted or is unavailable.'));
   }
   if (!hasResolved) {
     children = (0,external_React_namespaceObject.createElement)(external_wp_components_namespaceObject.Placeholder, null, (0,external_React_namespaceObject.createElement)(external_wp_components_namespaceObject.Spinner, null));
   }
-  return (0,external_React_namespaceObject.createElement)(external_wp_blockEditor_namespaceObject.RecursionProvider, {
-    uniqueId: ref
-  }, userCanEdit && onNavigateToEntityRecord && (0,external_React_namespaceObject.createElement)(external_wp_blockEditor_namespaceObject.BlockControls, null, (0,external_React_namespaceObject.createElement)(external_wp_components_namespaceObject.ToolbarGroup, null, (0,external_React_namespaceObject.createElement)(external_wp_components_namespaceObject.ToolbarButton, {
+  return (0,external_React_namespaceObject.createElement)(external_React_namespaceObject.Fragment, null, userCanEdit && onNavigateToEntityRecord && (0,external_React_namespaceObject.createElement)(external_wp_blockEditor_namespaceObject.BlockControls, null, (0,external_React_namespaceObject.createElement)(external_wp_components_namespaceObject.ToolbarGroup, null, (0,external_React_namespaceObject.createElement)(external_wp_components_namespaceObject.ToolbarButton, {
     onClick: handleEditOriginal
   }, (0,external_wp_i18n_namespaceObject.__)('Edit original')))), canOverrideBlocks && (0,external_React_namespaceObject.createElement)(external_wp_blockEditor_namespaceObject.BlockControls, null, (0,external_React_namespaceObject.createElement)(external_wp_components_namespaceObject.ToolbarGroup, null, (0,external_React_namespaceObject.createElement)(external_wp_components_namespaceObject.ToolbarButton, {
     onClick: resetContent,
@@ -49275,7 +49333,7 @@ const {
 
 const block_settings = {
   deprecated: block_deprecated,
-  edit: ReusableBlockEdit,
+  edit: ReusableBlockEditRecursionWrapper,
   icon: library_symbol,
   __experimentalLabel: ({
     ref
